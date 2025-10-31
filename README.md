@@ -18,6 +18,8 @@ A full-stack personal finance web application that tracks expenses and provides 
 - **Dark/Light Mode**: Toggle between themes with persistent storage
 - **Profile Management**: Update profile and change password
 - **Responsive Design**: Works seamlessly on desktop and mobile devices
+- **CSV export**
+-**AI chat interface**
 
 ## 🛠️ Tech Stack
 
@@ -241,9 +243,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 👤 Author
 
 Your Name
-- GitHub: [@yourusername](https://github.com/yourusername)
-- LinkedIn: [Your Name](https://linkedin.com/in/yourprofile)
-- Portfolio: [yourwebsite.com](https://yourwebsite.com)
+- GitHub: [@rsaiteja903](https://github.com/rsaiteja903)
+- LinkedIn: [Sai Teja Rajaboyina](https://linkedin.com/in/sai-teja-rajaboyina)
+- Portfolio: [r-saiteja.vercel.app](https://r-saiteja.vercel.app)
 
 ## 🙏 Acknowledgments
 
@@ -256,16 +258,6 @@ Your Name
 ## 🐛 Known Issues
 
 None at the moment. Please report issues in the [Issues](https://github.com/yourusername/smart-expense-tracker/issues) section.
-
-## 🔮 Future Enhancements
-
-- [ ] Export data to CSV/PDF
-- [ ] Budget setting and alerts
-- [ ] Multi-currency support
-- [ ] Recurring expense tracking
-- [ ] Mobile app (React Native)
-- [ ] Email notifications
-- [ ] Advanced filters and search
 
 ## 📧 Support
 

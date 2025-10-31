@@ -297,69 +297,184 @@ async def get_ai_insights(current_user: dict = Depends(get_current_user)):
     expenses = await db.expenses.find({"user_id": current_user['id']}, {"_id": 0}).to_list(1000)
     
     if not expenses:
-        return {"insights": ["Start tracking your expenses to get personalized insights."]}
+        return {
+            "insights": ["Start tracking your expenses to get personalized insights."],
+            "spending_trends": [],
+            "category_analysis": {},
+            "budget_health": {"status": "unknown", "message": "No data available"},
+            "predictions": {}
+        }
     
-    summary = {
-        "total_expenses": sum(exp['amount'] for exp in expenses),
-        "expense_count": len(expenses),
-        "categories": {}
-    }
+    # Calculate comprehensive analytics
+    from datetime import datetime, timedelta
+    from collections import defaultdict
     
+    total_expenses = sum(exp['amount'] for exp in expenses)
+    expense_count = len(expenses)
+    
+    # Category analysis
+    category_totals = defaultdict(float)
     for exp in expenses:
-        cat = exp['category']
-        if cat in summary['categories']:
-            summary['categories'][cat] += exp['amount']
+        category_totals[exp['category']] += exp['amount']
+    
+    # Monthly trends
+    monthly_data = defaultdict(lambda: {"total": 0, "count": 0, "categories": defaultdict(float)})
+    for exp in expenses:
+        month_key = exp['date'][:7]
+        monthly_data[month_key]["total"] += exp['amount']
+        monthly_data[month_key]["count"] += 1
+        monthly_data[month_key]["categories"][exp['category']] += exp['amount']
+    
+    # Sort months
+    sorted_months = sorted(monthly_data.keys())
+    
+    # Calculate trends
+    spending_trends = []
+    for i, month in enumerate(sorted_months):
+        data = monthly_data[month]
+        trend_info = {
+            "month": month,
+            "total": data["total"],
+            "count": data["count"],
+            "average": data["total"] / data["count"] if data["count"] > 0 else 0
+        }
+        
+        # Compare with previous month
+        if i > 0:
+            prev_month = sorted_months[i-1]
+            prev_total = monthly_data[prev_month]["total"]
+            if prev_total > 0:
+                change = ((data["total"] - prev_total) / prev_total) * 100
+                trend_info["change_percent"] = round(change, 1)
+                trend_info["trend"] = "up" if change > 0 else "down" if change < 0 else "stable"
+        
+        spending_trends.append(trend_info)
+    
+    # Budget health assessment
+    if len(sorted_months) >= 2:
+        recent_month = monthly_data[sorted_months[-1]]["total"]
+        avg_monthly = sum(m["total"] for m in monthly_data.values()) / len(monthly_data)
+        
+        if recent_month > avg_monthly * 1.2:
+            budget_health = {
+                "status": "warning",
+                "message": f"Spending is {round((recent_month/avg_monthly - 1) * 100, 1)}% above average",
+                "recommendation": "Consider reviewing your expenses"
+            }
+        elif recent_month < avg_monthly * 0.8:
+            budget_health = {
+                "status": "good",
+                "message": f"Spending is {round((1 - recent_month/avg_monthly) * 100, 1)}% below average",
+                "recommendation": "Great job managing expenses"
+            }
         else:
-            summary['categories'][cat] = exp['amount']
+            budget_health = {
+                "status": "normal",
+                "message": "Spending is consistent with your average",
+                "recommendation": "Maintain current spending habits"
+            }
+    else:
+        budget_health = {"status": "insufficient_data", "message": "Need more data for analysis"}
+    
+    # Predictions
+    if len(sorted_months) >= 3:
+        recent_3_months = [monthly_data[m]["total"] for m in sorted_months[-3:]]
+        predicted_next_month = sum(recent_3_months) / len(recent_3_months)
+        predictions = {
+            "next_month_estimate": round(predicted_next_month, 2),
+            "annual_projection": round(predicted_next_month * 12, 2)
+        }
+    else:
+        predictions = {}
+    
+    # Prepare data for AI
+    summary = {
+        "total_expenses": total_expenses,
+        "expense_count": expense_count,
+        "categories": dict(category_totals),
+        "monthly_trend": spending_trends[-3:] if len(spending_trends) >= 3 else spending_trends,
+        "top_category": max(category_totals.items(), key=lambda x: x[1])[0] if category_totals else "None",
+        "average_transaction": total_expenses / expense_count if expense_count > 0 else 0
+    }
     
     try:
         openai_api_key = os.environ.get('OPENAI_API_KEY')
         if not openai_api_key:
-            return {"insights": ["Please configure OpenAI API key to generate insights."]}
-        
-        client = AsyncOpenAI(api_key=openai_api_key)
-        
-        prompt = f"""Analyze this expense data and provide 3-4 actionable financial insights.
+            insights = [
+                "Configure OpenAI API key to get AI-powered insights",
+                f"You've spent ${total_expenses:.2f} across {expense_count} transactions",
+                f"Your top spending category is {summary['top_category']}"
+            ]
+        else:
+            client = AsyncOpenAI(api_key=openai_api_key)
+            
+            prompt = f"""Analyze this comprehensive expense data and provide 5-6 detailed, actionable insights:
 
 Total spent: ${summary['total_expenses']:.2f}
 Number of transactions: {summary['expense_count']}
+Average per transaction: ${summary['average_transaction']:.2f}
+Top spending category: {summary['top_category']}
 Category breakdown: {summary['categories']}
+Recent monthly trends: {summary['monthly_trend']}
 
-Provide ONLY 3-4 insights as plain bullet points, one per line. Start each with a dash (-). 
-Be specific, helpful, and focus on spending patterns or recommendations.
-Example format:
-- Your food expenses account for 40% of total spending
-- Consider reducing transportation costs by using public transit
-- Great job keeping entertainment expenses under control"""
-        
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a financial advisor analyzing expense data. Provide 3-4 concise, actionable insights."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=300
-        )
-        
-        insights_text = response.choices[0].message.content.strip()
-        
-        insights = []
-        for line in insights_text.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            line = line.lstrip('- •*').strip()
-            if line and len(line) > 10 and not line.startswith('[') and not line.startswith('{'):
-                insights.append(line)
-        
-        if not insights:
-            insights = ["Your spending data has been analyzed. Continue tracking to see more patterns."]
-        
-        return {"insights": insights[:4]}
+Provide insights covering:
+1. Overall spending patterns
+2. Category-specific observations
+3. Month-over-month trends
+4. Actionable recommendations
+5. Potential savings opportunities
+6. Behavioral patterns
+
+Format: One insight per line, starting with a dash (-)"""
+            
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert financial advisor providing detailed, actionable insights based on spending data. Be specific and reference actual numbers."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            
+            insights_text = response.choices[0].message.content.strip()
+            
+            insights = []
+            for line in insights_text.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                line = line.lstrip('- •*0123456789.').strip()
+                if line and len(line) > 10:
+                    insights.append(line)
+            
+            if not insights:
+                insights = ["Continue tracking expenses for personalized insights"]
+    
     except Exception as e:
         logging.error(f"Error generating insights: {e}")
-        return {"insights": ["Unable to generate insights at this time. Please check your API key configuration."]}
+        insights = [
+            f"Total spending: ${total_expenses:.2f} across {expense_count} transactions",
+            f"Top category: {summary['top_category']} with ${category_totals[summary['top_category']]:.2f}",
+            "Unable to generate AI insights. Please check your API key configuration."
+        ]
+    
+    return {
+        "insights": insights[:6],
+        "spending_trends": spending_trends,
+        "category_analysis": {
+            "breakdown": dict(category_totals),
+            "top_category": summary['top_category'],
+            "category_count": len(category_totals)
+        },
+        "budget_health": budget_health,
+        "predictions": predictions,
+        "summary": {
+            "total": total_expenses,
+            "count": expense_count,
+            "average": summary['average_transaction']
+        }
+    }
 
 @api_router.post("/receipts/upload")
 async def upload_receipt(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
